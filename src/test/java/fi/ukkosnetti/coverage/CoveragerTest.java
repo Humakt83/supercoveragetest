@@ -10,7 +10,7 @@ public class CoveragerTest {
 
 	@Test
 	public void testCoverager() throws IOException {
-		Coverager.testAllPrintFiles();
+		new Coverager().coverage();
 	}
 	
 }

@@ -2,6 +2,7 @@ package fi.ukkosnetti.coverage;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,46 +13,41 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.Test;
+import fi.ukkosnetti.coverage.strategy.CoverageStrategy;
+import fi.ukkosnetti.coverage.strategy.DefaultCoverageStrategy;
 
 import static org.junit.Assert.fail;
 
 public class Coverager {
+	
+	private CoverageStrategy strategy = new DefaultCoverageStrategy();
 
-	/**
-	 * Call this method from your junit test to increase its code coverage
-	 * @throws IOException
-	 */
-	public static void testAll() throws IOException {
-		testAll(false);
+	public void coverage() throws IOException {
+		testAll();
+	}
+	
+	public void setCoverageStrategy(CoverageStrategy strategy) {
+		this.strategy = strategy;
 	}
 
-	public static void testAllPrintFiles() throws IOException {
-		testAll(true);
-	}
-
-	private static void testAll(final boolean printFiles) throws IOException {
+	private void testAll() throws IOException {
 		final String prefix = "src\\main\\java\\", unixPrefix = "src/main/java/", postfix = ".java";
-		try (Stream<Path> stream = Files.find(Paths.get(""), 20, (path, attr) ->
+		try (Stream<Path> stream = Files.find(Paths.get(""), strategy.getDepthToScanFilesFromFolders(), (path, attr) ->
 		(String.valueOf(path).startsWith(prefix) || String.valueOf(path).startsWith(unixPrefix)) &&String.valueOf(path).endsWith(postfix))) {
 			stream.sorted()
 			.map(String::valueOf)
-			.peek(pathName -> {
-				if (printFiles) {
-					System.out.println(pathName);
-				}
-			})
+			.peek(strategy::printOut)
 			.map(pathName -> pathName.replace(prefix, ""))
 			.map(pathName -> pathName.replace(unixPrefix, ""))
 			.map(pathName -> pathName.replace(postfix, ""))
 			.map(pathName -> pathName.replace("\\", "."))
 			.map(pathName -> pathName.replace("/", "."))
-			.map(Coverager::loadClass)
-			.forEach(Coverager::testClass);
+			.map(this::loadClass)
+			.forEach(this::testClass);
 		}
 	}
 
-	private static Class<?> loadClass(String className) {
+	private Class<?> loadClass(String className) {
 		try {
 			return ClassLoader.getSystemClassLoader().loadClass(className);
 		} catch (ClassNotFoundException e) {
@@ -60,7 +56,7 @@ public class Coverager {
 		}
 	}
 
-	private static void testClass(Class<?> cls) {
+	private void testClass(Class<?> cls) {
 		try {
 			List<Method> methods = Arrays.asList(cls.getDeclaredMethods());
 			Arrays.asList(cls.getConstructors()).stream().forEach(constructor -> {
@@ -71,15 +67,10 @@ public class Coverager {
 		}
 	}
 
-	private static void testMethods(List<Method> methods, Constructor<?> constructor) {
+	private void testMethods(List<Method> methods, Constructor<?> constructor) {
 		try {
-			Object obj;
-			if (constructor.getParameterCount() > 0) {
-				obj = constructor.newInstance(constructor.getParameters());				
-			} else {
-				obj = constructor.newInstance();
-			}
-			System.out.println(obj.getClass().getSimpleName());
+			Object obj = constructObjectToTest(constructor);
+			strategy.printOut(obj.getClass().getName());
 			for(Method method : methods) {
 				System.out.println(method.getName());
 				method.setAccessible(true);
@@ -94,7 +85,13 @@ public class Coverager {
 		}
 	}
 
-	private static Object[] parameterTypesToObjects(Class<?>[] classes) throws Exception {
+	private Object constructObjectToTest(Constructor<?> constructor)
+			throws InstantiationException, IllegalAccessException, InvocationTargetException, Exception {
+		return constructor.getParameterCount() > 0 ? constructor.newInstance(parameterTypesToObjects(constructor.getParameterTypes()))
+				: constructor.newInstance();
+	}
+
+	private Object[] parameterTypesToObjects(Class<?>[] classes) throws Exception {
 		return Arrays.asList(classes).stream()
 				.map((ThrowingCreatingFunction<Class<?>, Constructor<?>>)Class::getConstructor)
 				.map((ThrowingCreatingFunction<Constructor<?>, Object>)Constructor::newInstance)
