@@ -1,22 +1,27 @@
 package fi.ukkosnetti.coverage;
 
+import static org.junit.Assert.fail;
+
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.mockito.Mockito;
+
 import fi.ukkosnetti.coverage.strategy.CoverageStrategy;
 import fi.ukkosnetti.coverage.strategy.DefaultCoverageStrategy;
-
-import static org.junit.Assert.fail;
+import javaslang.control.Match;
 
 public class Coverager {
 	
@@ -63,38 +68,94 @@ public class Coverager {
 				testMethods(methods, constructor);
 			});
 		} catch (Exception e) {
-			System.out.println(e);
+			strategy.printOut(e);
 		}
 	}
 
 	private void testMethods(List<Method> methods, Constructor<?> constructor) {
 		try {
-			Object obj = constructObjectToTest(constructor);
+			Object obj = constructObject(constructor);
 			strategy.printOut(obj.getClass().getName());
 			for(Method method : methods) {
-				System.out.println(method.getName());
-				method.setAccessible(true);
-				if (method.getParameterCount() > 0) {
-					method.invoke(obj, parameterTypesToObjects(method.getParameterTypes()));
-				} else {
-					method.invoke(obj);
+				try {
+					testMethod(obj, method);
+				} catch (Exception e) {
+					strategy.printOut(e);
 				}
 			}
 		} catch (Exception e) {
-			throw new RuntimeException(e);
+			strategy.printOut(e);
 		}
 	}
 
-	private Object constructObjectToTest(Constructor<?> constructor)
-			throws InstantiationException, IllegalAccessException, InvocationTargetException, Exception {
-		return constructor.getParameterCount() > 0 ? constructor.newInstance(parameterTypesToObjects(constructor.getParameterTypes()))
-				: constructor.newInstance();
+	private void testMethod(Object obj, Method method)
+			throws IllegalAccessException, InvocationTargetException, Exception {
+		if (method.isSynthetic()) {
+			return;
+		}
+		strategy.printOut(method.getName());
+		method.setAccessible(true);
+		if (method.getParameterCount() > 0) {
+			method.invoke(obj, parameterTypesToObjects(method.getParameterTypes()));
+		} else {
+			method.invoke(obj);
+		}
 	}
 
+	private Object constructObject(final Constructor<?> constructor) throws Exception {
+		strategy.printOut(constructor.getDeclaringClass().getName());
+		if (Modifier.isInterface(constructor.getDeclaringClass().getModifiers())) {
+			return Mockito.mock(constructor.getDeclaringClass());
+		}
+		final int parameterCount = constructor.getParameterCount();
+		final ThrowingCreatingFunction<Constructor<?>, Object> objectSupply = (con) -> {
+			return parameterCount > 0 ? createWithParameters(con, parameterTypesToObjects(con.getParameterTypes()))
+					: constructor.newInstance();
+		};
+		Optional<Object> optional = parameterCount != 1 ? Optional.empty() 
+				: Optional.of(getParameterTypeAsBasicType(constructor.getParameterTypes()[0])).map((ThrowingCreatingFunction<Object, Object>)constructor::newInstance);
+		return optional.orElse(objectSupply.apply(constructor));
+	}
+	
+	private Object createWithParameters(Constructor<?> constructor, Object ... parameters) throws Exception {
+		final StringBuilder sb = new StringBuilder("Parameters used to construct: ");
+		for (Object param : parameters) {
+			sb.append(param.getClass().getSimpleName());
+			sb.append(", ");
+		}
+		strategy.printOut(sb.toString());
+		return constructor.newInstance(parameters);
+	}
+	
+	private Object getParameterTypeAsBasicType(Class<?> paramType) {
+		if (paramType.isPrimitive()) {
+			switch (paramType.getName()) {
+			case "boolean": return false;
+			case "double": return 0.0;
+			case "long": return 0l;
+			case "float": return 0f;
+			case "int":
+			case "byte": return 0;
+			case "char": return 'a';
+			default:
+				return null;
+			}
+		}
+		return Match.of(paramType)
+			.whenType(String.class).then(t -> (Object)new String(""))
+			.whenType(Double.class).then(t -> (Object)new Double(0.0))
+			.whenType(Float.class).then(t -> (Object)new Float(0f))
+			.whenType(Boolean.class).then(t -> (Object)new Boolean(false))
+			.whenType(Character.class).then(t -> (Object)new Character('c'))
+			.whenType(Long.class).then(t -> (Object)new Long(0))
+			.whenType(Integer.class).then(t -> (Object)new Integer(0))
+			.whenType(Byte.class).then(t -> (Object)new Byte(""))
+			.otherwise(() -> Mockito.mock(paramType)).get();
+	}
+	
 	private Object[] parameterTypesToObjects(Class<?>[] classes) throws Exception {
 		return Arrays.asList(classes).stream()
-				.map((ThrowingCreatingFunction<Class<?>, Constructor<?>>)Class::getConstructor)
-				.map((ThrowingCreatingFunction<Constructor<?>, Object>)Constructor::newInstance)
+				.map(this::getParameterTypeAsBasicType)
 				.collect(Collectors.toList()).toArray();
 	}
 
