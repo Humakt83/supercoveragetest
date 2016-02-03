@@ -17,4 +17,9 @@ public final class DefaultCoverageStrategy implements CoverageStrategy {
 		return true;
 	}
 
+	@Override
+	public boolean isThrowablePrintingOutEnabled() {
+		return true;
+	}
+
 }
