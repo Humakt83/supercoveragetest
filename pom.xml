@@ -3,9 +3,8 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>fi.ukkosnetti</groupId>
 	<artifactId>supercoveragetest</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.4.0-SNAPSHOT</version>
 	<name>Supercoveragetest</name>
-	<description>This is evilish unit test that increases code coverage</description>
 
 	<properties>
 		<java.version>1.8</java.version>
@@ -43,4 +42,5 @@
 			</plugin>
 		</plugins>
 	</build>
+	<description>Test tool that dynamically creates objects in the project source folder and invokes them.</description>
 </project>
