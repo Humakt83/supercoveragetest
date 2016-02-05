@@ -13,6 +13,11 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -27,7 +32,7 @@ public class Coverager {
 	
 	private CoverageStrategy strategy = new DefaultCoverageStrategy();
 
-	public void coverage() throws IOException {
+	public synchronized void coverage() throws IOException {
 		testAll();
 	}
 	
@@ -88,20 +93,42 @@ public class Coverager {
 		}
 	}
 
-	private void testMethod(Object obj, Method method)
+	private void testMethod(final Object obj, final Method method)
 			throws IllegalAccessException, InvocationTargetException, Exception {
 		if (method.isSynthetic()) {
 			return;
 		}
 		strategy.printOut(method.getName());
 		method.setAccessible(true);
-		if (method.getParameterCount() > 0) {
-			method.invoke(obj, parameterTypesToObjects(method.getParameterTypes()));
-		} else {
-			method.invoke(obj);
+		Future<?> future = Executors.newSingleThreadExecutor().submit(invokeMethod(obj, method));
+		try {
+			future.get(strategy.getTimeoutForMethodExecution(), TimeUnit.MILLISECONDS);
+		} catch (TimeoutException e) {
+			strategy.printOut("Method timedout");
+			future.cancel(true);
 		}
 	}
 
+	private Callable<?> invokeMethod(final Object obj, final Method method) {
+		return new Callable<Void>() {
+
+			@Override
+			public Void call() throws Exception {
+				try {
+					if (method.getParameterCount() > 0) {
+						method.invoke(obj, parameterTypesToObjects(method.getParameterTypes()));
+					} else {
+						method.invoke(obj);
+					}
+				} catch (Exception e) {
+					strategy.printOut(e);
+				}
+				return null;
+			}
+			
+		};
+	}
+	
 	private Object constructObject(final Constructor<?> constructor) throws Exception {
 		strategy.printOut(constructor.getDeclaringClass().getName());
 		if (Modifier.isInterface(constructor.getDeclaringClass().getModifiers())) {
@@ -129,17 +156,7 @@ public class Coverager {
 	
 	private Object getParameterTypeAsBasicType(Class<?> paramType) {
 		if (paramType.isPrimitive()) {
-			switch (paramType.getName()) {
-			case "boolean": return false;
-			case "double": return 0.0;
-			case "long": return 0l;
-			case "float": return 0f;
-			case "int":
-			case "byte": return 0;
-			case "char": return 'a';
-			default:
-				return null;
-			}
+			return returnPrimitiveType(paramType);
 		}
 		return Match.of(paramType)
 			.whenType(String.class).then(t -> (Object)new String(""))
@@ -151,6 +168,20 @@ public class Coverager {
 			.whenType(Integer.class).then(t -> (Object)new Integer(0))
 			.whenType(Byte.class).then(t -> (Object)new Byte(""))
 			.otherwise(() -> Mockito.mock(paramType)).get();
+	}
+
+	private Object returnPrimitiveType(Class<?> paramType) {
+		switch (paramType.getName()) {
+		case "boolean": return false;
+		case "double": return 0.0;
+		case "long": return 0l;
+		case "float": return 0f;
+		case "int":
+		case "byte": return 0;
+		case "char": return 'a';
+		default:
+			return null;
+		}
 	}
 	
 	private Object[] parameterTypesToObjects(Class<?>[] classes) throws Exception {
@@ -174,4 +205,5 @@ public class Coverager {
 		T applyThrows(F elem) throws Exception;
 
 	}
+	
 }

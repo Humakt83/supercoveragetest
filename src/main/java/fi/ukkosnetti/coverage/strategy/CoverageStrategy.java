@@ -2,9 +2,9 @@ package fi.ukkosnetti.coverage.strategy;
 
 public interface CoverageStrategy {
 	
-	int getDepthForConstructorInjection();
-	
 	int getDepthToScanFilesFromFolders();
+	
+	long getTimeoutForMethodExecution();
 	
 	boolean isPrintingOutEnabled();
 	
